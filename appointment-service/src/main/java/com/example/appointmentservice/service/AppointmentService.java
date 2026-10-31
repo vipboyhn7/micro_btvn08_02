@@ -2,67 +2,46 @@ package com.example.appointmentservice.service;
 
 import com.example.appointmentservice.dto.AppointmentRequest;
 import com.example.appointmentservice.dto.AppointmentResponse;
+import com.example.appointmentservice.dto.AddAppointmentRequest;
+import com.example.appointmentservice.dto.AppointmentCreatedResponse;
 import com.example.appointmentservice.dto.DoctorAvailabilityResponse;
-import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
-import io.github.resilience4j.circuitbreaker.CircuitBreaker;
-import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.web.client.RestClientException;
 
 @Service
 public class AppointmentService {
 
-    private final RestTemplate doctorServiceClient;
-    private final CircuitBreaker doctorServiceCircuitBreaker;
+    private final DoctorService doctorService;
 
-    public AppointmentService(
-            RestTemplate doctorServiceClient,
-            CircuitBreakerRegistry circuitBreakerRegistry) {
-        this.doctorServiceClient = doctorServiceClient;
-        this.doctorServiceCircuitBreaker = circuitBreakerRegistry.circuitBreaker("doctorServiceCB");
+    public AppointmentService(DoctorService doctorService) {
+        this.doctorService = doctorService;
     }
 
-    public ResponseEntity<AppointmentResponse> checkAvailability(AppointmentRequest request) {
-        try {
-            DoctorAvailabilityResponse doctorResponse = doctorServiceCircuitBreaker.executeSupplier(
-                    () -> requestDoctorAvailability(request));
-            return ResponseEntity.ok(new AppointmentResponse(
-                    request.doctorId(),
-                    request.date(),
-                    request.time(),
-                    doctorResponse.available(),
-                    false,
-                    doctorResponse.message()));
-        } catch (CallNotPermittedException | RestClientException | IllegalStateException exception) {
-            return checkAvailabilityFallback(request);
+    public ResponseEntity<Object> checkAvailability(AppointmentRequest request) {
+        Object doctorResponse = doctorService.getDoctor(
+                request.doctorId(), request.date(), request.time());
+        if (!(doctorResponse instanceof DoctorAvailabilityResponse availability)) {
+            return ResponseEntity.status(503).body(doctorResponse);
         }
-    }
-
-    private DoctorAvailabilityResponse requestDoctorAvailability(AppointmentRequest request) {
-        DoctorAvailabilityResponse doctorResponse = doctorServiceClient.getForObject(
-                "/api/doctors/{doctorId}/availability?date={date}&time={time}",
-                DoctorAvailabilityResponse.class,
+        return ResponseEntity.ok(new AppointmentResponse(
                 request.doctorId(),
                 request.date(),
-                request.time());
+                request.time(),
+                availability.available(),
+                false,
+                availability.message()));
+    }
 
-        if (doctorResponse == null) {
-            throw new IllegalStateException("Doctor-Service returned an empty response");
+    public ResponseEntity<Object> addAppointment(AddAppointmentRequest request) {
+        Object doctorResponse = doctorService.getDoctor(request.doctorId(), "", "");
+        if (!(doctorResponse instanceof DoctorAvailabilityResponse)) {
+            return ResponseEntity.status(503).body(doctorResponse);
         }
-        return doctorResponse;
+        return ResponseEntity.ok(new AppointmentCreatedResponse(
+                request.patientName(),
+                request.doctorId(),
+                request.reason(),
+                "Appointment created successfully"));
     }
 
-    private ResponseEntity<AppointmentResponse> checkAvailabilityFallback(AppointmentRequest request) {
-        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                .body(new AppointmentResponse(
-                        request.doctorId(),
-                        request.date(),
-                        request.time(),
-                        false,
-                        true,
-                        "Doctor-Service is currently unavailable. Please try again later."));
-    }
 }

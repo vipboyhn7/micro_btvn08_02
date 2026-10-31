@@ -20,15 +20,29 @@ DOCTOR_SERVICE_URL=http://localhost:8082 mvn spring-boot:run
 ## Gọi thử
 
 ```bash
-curl -i -X POST http://localhost:8083/api/appointments/check-availability \
+curl -i -X POST http://localhost:8083/api/v1/appointments \
   -H 'Content-Type: application/json' \
-  -d '{"doctorId":"doctor-1","date":"2026-11-01","time":"09:00"}'
+  -d '{"patientName":"Nguyen Van A","doctorId":"1","reason":"Dau bung"}'
 ```
 
-Tắt Doctor-Service rồi thực hiện 5 request để quan sát log:
+Khi Doctor-Service lỗi, client nhận HTTP `503` và JSON:
+
+```json
+{
+  "message": "Hiện tại không thể kiểm tra thông tin bác sĩ, vui lòng thử lại sau vài giây",
+  "status": 503,
+  "error": "Doctor Service Error",
+  "timestamp": "2026-10-31T07:57:13.504992Z"
+}
+```
+
+Tắt Doctor-Service rồi thực hiện request để kích hoạt fallback. Sau tối thiểu 5
+request lỗi, Circuit Breaker chuyển trạng thái và ghi log:
 
 ```text
 CircuitBreaker 'doctorServiceCB' changed state from CLOSED to OPEN
 ```
 
-Trong trạng thái `OPEN`, response fallback có HTTP `503` và `"fallback": true`.
+Khi lỗi kết nối chỉ xảy ra tạm thời, `patientRetry` sẽ thử tối đa 3 lần,
+mỗi lần cách nhau 2 giây. Chỉ lỗi `ResourceAccessException` được retry; sau
+khi cả 3 lần đều thất bại, fallback trả HTTP `503`.
